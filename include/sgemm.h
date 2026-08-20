@@ -22,4 +22,11 @@ void launch_tiled(const float* A, const float* B, float* C, int M, int N, int K)
 // Requires M, N and K to be multiples of 64, 64 and 8 respectively.
 void launch_register_tiled(const float* A, const float* B, float* C, int M, int N, int K);
 
+// Two-dimensional register tiling with vectorised loads. Each thread owns an
+// 8 x 8 block of C, so one row of A and one column of B feed 64 multiply-adds.
+// Global loads move 16 bytes at a time, and the A tile is transposed on its way
+// into shared memory so the inner loop can read it four floats at a time too.
+// Requires M and N to be multiples of 128 and K a multiple of 8.
+void launch_vectorized(const float* A, const float* B, float* C, int M, int N, int K);
+
 }  // namespace sgemm

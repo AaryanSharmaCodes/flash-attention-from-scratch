@@ -135,6 +135,7 @@ int main(int argc, char** argv) {
       {"coalesced", sgemm::launch_coalesced},
       {"tiled", sgemm::launch_tiled},
       {"register_tiled", sgemm::launch_register_tiled},
+      {"vectorized", sgemm::launch_vectorized},
   };
 
   for (const Entry& entry : ladder) {

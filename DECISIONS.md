@@ -129,3 +129,31 @@ matching order at this size.
 Worth stating plainly: throughput moves by a factor of 32 across the ladder and
 the result does not change by one bit. These optimisations are about moving data,
 not about arithmetic.
+
+## Quoting "percentage of cuBLAS" needs a caveat
+
+The same benchmark run twice on the same T4 gave cuBLAS 2721 GFLOP/s and then
+3311 GFLOP/s at 1024, a 22% swing. The ladder's own kernels moved by less than
+half a percent across the same two runs (1908 then 1914), so this is the card
+changing clock and power state rather than anything in the code.
+
+That means "percentage of cuBLAS" is only meaningful when both numbers come from
+the same run, which they do here since the benchmark times cuBLAS itself each
+time. It also means a single percentage is not worth quoting to better than a few
+points, and the README says so rather than implying a precision the measurement
+does not have.
+
+## A fifth rung, because the fourth one plateaued
+
+register_tiled measured 1914, 1863 GFLOP/s at 1024 and 2048 -- essentially flat,
+while cuBLAS climbed from 3311 to 4666 over the same range. Flat throughput
+against a growing problem is what it looks like when there is not enough
+arithmetic in flight to hide memory latency, and no amount of tuning the existing
+kernel fixes that.
+
+So each thread now owns an 8 x 8 block of C rather than an 8 x 1 column. Sixteen
+shared reads produce sixty-four multiply-adds, against nine reads for eight
+before. Global loads become float4, and the A tile is transposed on the way into
+shared memory so the inner loop can read it four at a time as well -- in the
+original layout the TM rows a thread wants at a fixed k are BK apart, and
+transposing makes them adjacent.
