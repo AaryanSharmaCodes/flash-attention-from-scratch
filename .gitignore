@@ -1,0 +1,8 @@
+build/
+*.o
+*.out
+*.ncu-rep
+*.nsys-rep
+__pycache__/
+.venv/
+.DS_Store
