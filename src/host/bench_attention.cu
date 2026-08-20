@@ -184,8 +184,13 @@ int main(int argc, char** argv) {
                  prop.name, N, d, iters);
     std::fprintf(f, "  \"scratch_mb\": {\"unfused\": %.1f, \"fused\": 0.0},\n", scratch_mb);
     std::fprintf(f, "  \"tolerance\": %.3e,\n", tol);
-    std::fprintf(f, "  \"err_vs_reference\": {\"unfused\": %.3e, \"fused\": %.3e},\n",
-                 err_unfused, err_fused);
+    // null rather than the -1 sentinel when the CPU check was skipped, so a
+    // reader of the JSON cannot mistake it for a measurement.
+    if (err_unfused < 0)
+      std::fprintf(f, "  \"err_vs_reference\": {\"unfused\": null, \"fused\": null},\n");
+    else
+      std::fprintf(f, "  \"err_vs_reference\": {\"unfused\": %.3e, \"fused\": %.3e},\n",
+                   err_unfused, err_fused);
     std::fprintf(f, "  \"err_fused_vs_unfused\": %.3e,\n", err_pair);
     std::fprintf(f, "  \"unfused\": {\"ms\": %.4f, \"gflops\": %.1f},\n", ms_unfused,
                  flops / (ms_unfused * 1e6));

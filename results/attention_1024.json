@@ -1,0 +1,13 @@
+{
+  "device": "Tesla T4",
+  "N": 1024, "d": 64, "iters": 20,
+  "scratch_mb": {"unfused": 4.0, "fused": 0.0},
+  "tolerance": 3.052e-05,
+  "err_vs_reference": {"unfused": 1.192e-07, "fused": 6.557e-07},
+  "err_fused_vs_unfused": 5.960e-07,
+  "unfused": {"ms": 0.3863, "gflops": 695.0},
+  "fused": {"ms": 0.5254, "gflops": 510.9},
+  "speedup": 0.735,
+  "best_shape": {"BR": 128, "BC": 64, "ms": 0.4950, "speedup_vs_unfused": 0.780},
+  "correct": true
+}

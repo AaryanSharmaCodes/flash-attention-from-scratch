@@ -1,0 +1,14 @@
+{
+  "device": "Tesla T4",
+  "sm": "7.5",
+  "M": 4096, "N": 4096, "K": 4096,
+  "iters": 20,
+  "cublas": {"ms": 32.6453, "gflops": 4210.1},
+  "kernels": [
+    {"name": "naive", "ms": 2222.8521, "gflops": 61.8, "pct_of_cublas": 1.5, "frobenius_rel": 0.000e+00, "max_abs_err": 0.000e+00, "correct": true},
+    {"name": "coalesced", "ms": 256.2512, "gflops": 536.3, "pct_of_cublas": 12.7, "frobenius_rel": 0.000e+00, "max_abs_err": 0.000e+00, "correct": true},
+    {"name": "tiled", "ms": 168.6944, "gflops": 814.7, "pct_of_cublas": 19.4, "frobenius_rel": 0.000e+00, "max_abs_err": 0.000e+00, "correct": true},
+    {"name": "register_tiled", "ms": 81.1387, "gflops": 1693.9, "pct_of_cublas": 40.2, "frobenius_rel": 0.000e+00, "max_abs_err": 0.000e+00, "correct": true},
+    {"name": "vectorized", "ms": 41.5697, "gflops": 3306.2, "pct_of_cublas": 78.5, "frobenius_rel": 0.000e+00, "max_abs_err": 0.000e+00, "correct": true}
+  ]
+}

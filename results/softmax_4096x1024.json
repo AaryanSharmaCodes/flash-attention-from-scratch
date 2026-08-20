@@ -1,0 +1,11 @@
+{
+  "device": "Tesla T4",
+  "peak_gbs": 320,
+  "rows": 4096, "cols": 1024, "iters": 50, "tolerance": 3.052e-05,
+  "kernels": [
+    {"name": "naive", "ms": 1.2666, "gbs": 26.5, "pct_of_peak": 8.3, "max_abs_err": 5.305e-06, "correct": true},
+    {"name": "shared_tree", "ms": 0.1464, "gbs": 229.1, "pct_of_peak": 71.6, "max_abs_err": 2.980e-07, "correct": true},
+    {"name": "warp_shuffle", "ms": 0.1465, "gbs": 229.1, "pct_of_peak": 71.6, "max_abs_err": 2.980e-07, "correct": true},
+    {"name": "online", "ms": 0.1464, "gbs": 229.1, "pct_of_peak": 71.6, "max_abs_err": 2.980e-07, "correct": true}
+  ]
+}
