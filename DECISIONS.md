@@ -249,3 +249,39 @@ the shared memory limit instead.
 Both are arguments, not measurements, so the benchmark now sweeps eight
 combinations of BR and BC and reports the best. The default shape is one point on
 that grid and there was no reason to assume it was the right one.
+
+## Absolute timings move by more than the optimisations do
+
+The attention benchmark, same binary and same card, run twice:
+
+                    cold run    warm run
+    unfused N=1024   0.942 ms    0.386 ms
+    fused   N=1024   1.400 ms    0.525 ms
+
+A factor of 2.4 with nothing changed but what the GPU had been doing beforehand.
+A T4 has a base clock of 585 MHz and boosts to 1590 MHz, and in the second run
+five minutes of matmul benchmarks had already pushed it to the top of that range.
+
+The ratios barely moved: 0.67, 1.33, 1.96 in the cold run against 0.74, 1.22,
+2.03 in the warm one. So every comparison in this repo is made within a single
+run, with the baseline timed alongside the thing being compared, and speedups
+rather than milliseconds are what gets quoted. An absolute time here describes
+the clock state of one afternoon.
+
+## The tile shape sweep, and what it actually showed
+
+    N=4096          BC=16     BC=32     BC=64
+    BR=64          3.109 ms  3.072 ms  3.057 ms
+    BR=128         2.219 ms  2.276 ms  2.248 ms
+    BR=256         2.863 ms  2.753 ms      --
+
+BR=128 is the best row count at every sequence length tested, and BR=256 is worse
+than both. That matches the register arithmetic: at 165 registers a thread, 128
+threads need 21120 of the 65536 a multiprocessor has and three blocks fit, while
+256 threads need 42240 and only one does. Fewer resident warps, less to hide
+latency with.
+
+BC does almost nothing. The three values at BR=128 span 2.219 to 2.276 ms, which
+is within the run-to-run variation, so the honest reading is that the number of
+keys staged per tile does not matter over this range rather than that BC=16 is
+optimal. It is reported as a null result rather than tuned to the best number.
