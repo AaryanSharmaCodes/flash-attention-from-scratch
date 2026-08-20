@@ -207,3 +207,45 @@ and the measurement showing they do not help is more useful than a ladder where
 every rung happens to look like an improvement. The warp reduction also has to
 exist for its own sake, since the fused attention kernel reduces across a warp
 where there is no bandwidth wall to hide behind.
+
+## Fusion loses at short sequences, and the cache size says why
+
+    N      scores    unfused    fused    speedup
+    1024     4 MB    0.942 ms   1.400 ms   0.67x
+    2048    16 MB    2.755 ms   2.066 ms   1.33x
+    4096    64 MB    7.402 ms   3.769 ms   1.96x
+
+The fused kernel is the slower of the two at N=1024. That is not a defect and it
+is not noise, and the crossover point is not a coincidence.
+
+A T4 has 4 MB of L2. The score matrix at N=1024 is 4 MB. So at that size the
+round trip through global memory that fusion exists to avoid is being served by
+L2 and costs almost nothing, while the fused kernel still pays its own costs: 25%
+occupancy, and a dot product per key that cannot use the tiled matmul path. At
+N=2048 the scores are four times the size of L2, at N=4096 sixteen times, and the
+unfused path starts paying real DRAM bandwidth to move a matrix the fused path
+never writes down.
+
+So the honest summary is that fusion buys memory unconditionally and time only
+once the intermediate stops fitting in cache. The memory claim is the durable one:
+64 MB against zero at N=4096, growing with the square of the sequence length,
+which is what makes long context possible at all.
+
+## Occupancy of the fused kernel, and why the tile shape is swept
+
+    Used 165 registers, 0 bytes spill stores, 0 bytes spill loads, 16384 bytes smem
+
+No spilling, which was the thing to check: q and o are 128 floats per thread and
+would have been useless in local memory. But 16 KB of shared memory per block
+allows only four blocks per multiprocessor, so 4 x 64 = 256 of a possible 1024
+threads are resident. 25% occupancy.
+
+Shared memory is BC * 64 * 2 floats and does not depend on BR at all, so more
+rows per block cost nothing in shared memory and shift the limit onto registers:
+128 threads at 165 registers need 21120 of the 65536 available, which allows
+three blocks, so 384 threads rather than 256. Fewer keys staged per tile relaxes
+the shared memory limit instead.
+
+Both are arguments, not measurements, so the benchmark now sweeps eight
+combinations of BR and BC and reports the best. The default shape is one point on
+that grid and there was no reason to assume it was the right one.

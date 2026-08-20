@@ -53,6 +53,11 @@ void run_unfused() {
 }
 void run_fused() { attention::launch_fused(gQ, gK, gV, gO, gN, gD, gScale); }
 
+int gBR = 64, gBC = 32;
+void run_fused_config() {
+  attention::launch_fused_config(gQ, gK, gV, gO, gN, gD, gScale, gBR, gBC);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -135,6 +140,40 @@ int main(int argc, char** argv) {
               flops / (ms_fused * 1e6));
   std::printf("%-16s %9.2fx\n", "speedup", ms_unfused / ms_fused);
 
+  // Tile-shape sweep. The default shape is one point on this grid, and the
+  // fused kernel losing at small N is a question about occupancy, so the useful
+  // thing is to measure the alternatives rather than reason about them.
+  std::printf("\ntile shape sweep (BR = rows per block, BC = keys staged)\n");
+  std::printf("%6s %6s %12s %12s %10s\n", "BR", "BC", "smem KB", "ms", "vs default");
+  const int shapes[][2] = {{64, 16}, {64, 32}, {64, 64},
+                           {128, 16}, {128, 32}, {128, 64},
+                           {256, 16}, {256, 32}};
+  double best_ms = ms_fused;
+  int best_br = 64, best_bc = 32;
+  for (const auto& sh : shapes) {
+    gBR = sh[0];
+    gBC = sh[1];
+    CUDA_CHECK(cudaMemset(dO, 0, hQ.size() * sizeof(float)));
+    if (!attention::launch_fused_config(dQ, dK, dV, dO, N, d, scale, gBR, gBC)) continue;
+
+    std::vector<float> probe((size_t)N * d);
+    CUDA_CHECK(cudaMemcpy(probe.data(), dO, probe.size() * sizeof(float), cudaMemcpyDeviceToHost));
+    const double e = max_abs(probe, out_unfused);
+
+    const double t = time_it(run_fused_config, warmup, iters);
+    const double smem_kb = sh[1] * 64.0 * 2.0 * sizeof(float) / 1024.0;
+    std::printf("%6d %6d %12.1f %12.3f %9.2fx%s\n", sh[0], sh[1], smem_kb, t,
+                ms_fused / t, e < tol ? "" : "   <-- WRONG");
+    if (t < best_ms && e < tol) {
+      best_ms = t;
+      best_br = sh[0];
+      best_bc = sh[1];
+    }
+  }
+  std::printf("best: BR=%d BC=%d at %.3f ms, %.2fx the default shape\n", best_br,
+              best_bc, best_ms, ms_fused / best_ms);
+  std::printf("against unfused: %.2fx\n", ms_unfused / best_ms);
+
   const bool ok = err_pair < tol && (err_fused < 0 || err_fused < tol);
 
   char path[128];
@@ -152,8 +191,11 @@ int main(int argc, char** argv) {
                  flops / (ms_unfused * 1e6));
     std::fprintf(f, "  \"fused\": {\"ms\": %.4f, \"gflops\": %.1f},\n", ms_fused,
                  flops / (ms_fused * 1e6));
-    std::fprintf(f, "  \"speedup\": %.3f,\n  \"correct\": %s\n}\n", ms_unfused / ms_fused,
-                 ok ? "true" : "false");
+    std::fprintf(f, "  \"speedup\": %.3f,\n", ms_unfused / ms_fused);
+    std::fprintf(f, "  \"best_shape\": {\"BR\": %d, \"BC\": %d, \"ms\": %.4f, "
+                    "\"speedup_vs_unfused\": %.3f},\n", best_br, best_bc, best_ms,
+                 ms_unfused / best_ms);
+    std::fprintf(f, "  \"correct\": %s\n}\n", ok ? "true" : "false");
     std::fclose(f);
     std::printf("\nwrote %s\n", path);
   }

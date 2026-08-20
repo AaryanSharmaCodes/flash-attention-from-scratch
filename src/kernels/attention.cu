@@ -160,4 +160,26 @@ void launch_fused(const float* Q, const float* K, const float* V, float* O, int 
   CUDA_CHECK_LAUNCH();
 }
 
+bool launch_fused_config(const float* Q, const float* K, const float* V, float* O,
+                         int N, int d, float scale, int BR, int BC) {
+  constexpr int HD = 64;
+  if (d != HD) return false;
+
+  // Shared memory is BC * HD * 2 floats and does not depend on BR, so raising
+  // BR adds threads per block at no shared-memory cost. Registers then become
+  // the limit instead: at 165 per thread, 64 threads need 10560 of the 65536 a
+  // multiprocessor has and 128 threads need 21120.
+#define TRY(br, bc)                                                            \
+  if (BR == (br) && BC == (bc)) {                                              \
+    fused<HD, (br), (bc)><<<ceil_div(N, (br)), (br)>>>(Q, K, V, O, N, scale);   \
+    CUDA_CHECK_LAUNCH();                                                       \
+    return true;                                                               \
+  }
+  TRY(64, 16) TRY(64, 32) TRY(64, 64)
+  TRY(128, 16) TRY(128, 32) TRY(128, 64)
+  TRY(256, 16) TRY(256, 32)
+#undef TRY
+  return false;
+}
+
 }  // namespace attention

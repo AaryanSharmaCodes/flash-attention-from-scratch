@@ -26,4 +26,11 @@ void launch_unfused(const float* Q, const float* K, const float* V, float* O,
 void launch_fused(const float* Q, const float* K, const float* V, float* O,
                   int N, int d, float scale);
 
+// The same fused kernel with the tile shape chosen at runtime, for sweeping.
+// BR is threads per block and therefore query rows per block; BC is how many
+// keys are staged in shared memory at once. Returns false for a combination
+// that was not compiled.
+bool launch_fused_config(const float* Q, const float* K, const float* V, float* O,
+                         int N, int d, float scale, int BR, int BC);
+
 }  // namespace attention
