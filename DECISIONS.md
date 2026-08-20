@@ -157,3 +157,53 @@ before. Global loads become float4, and the A tile is transposed on the way into
 shared memory so the inner loop can read it four at a time as well -- in the
 original layout the TM rows a thread wants at a fixed k are BK apart, and
 transposing makes them adjacent.
+
+## The same reference mistake, made twice
+
+The softmax benchmark flagged three of four kernels as wrong at 4096 columns.
+The pattern gave it away: the one-thread-per-row kernel scored 1.19e-07 while the
+three parallel ones scored around 1.56e-05, a hundred times worse.
+
+The per-row kernel is not more accurate. It sums the row sequentially from j=0,
+which is exactly what the CPU reference did, so the two made identical rounding
+errors and cancelled. The parallel kernels sum in a different order and therefore
+disagree with the reference by whatever the reference's own error happens to be.
+
+That error is predictable. Summing n floats sequentially in float32 carries a
+relative error near sqrt(n) * eps:
+
+    1024 columns:  sqrt(1024) * 1.19e-07 = 3.8e-06,  observed 5.36e-06
+    4096 columns:  sqrt(4096) * 1.19e-07 = 7.6e-06,  observed 1.56e-05
+
+The reference now accumulates in double, which puts its own error near 1e-15 and
+makes it an actual referee. This is the second time in this repo that a
+correctness failure turned out to be the reference rather than the kernel, which
+is worth stating as a rule: a reference is only a reference if it is more precise
+than the thing it is judging.
+
+The tolerance scales as sqrt(cols) for the same reason. The kernels sum in
+float32 and always will, so their error grows with the row length no matter how
+they are written. A fixed tolerance would pass everything at 1024 or fail
+everything at 4096.
+
+## Two softmax optimisations that changed nothing, kept anyway
+
+    shared_tree     0.147 ms   228.2 GB/s   71.3% of peak
+    warp_shuffle    0.146 ms   230.2 GB/s   71.9% of peak
+    online          0.146 ms   230.1 GB/s   71.9% of peak
+
+The warp shuffle version replaces a log2(BLOCK)-step shared memory tree with a
+register reduction and two barriers instead of eight. The online version removes
+an entire pass over the row. Neither is worth anything here, and the reason is
+the same for both: at 72% of theoretical bandwidth the kernel is limited by
+moving the data, and neither change moves less of it.
+
+The removed pass in particular looks like it should help until you notice a row
+is 4 KB at 1024 columns and 16 KB at 4096, so the re-reads were being served by
+L1 and never reached DRAM. The pass was free before it was removed.
+
+Both kernels stay in the repo. They are correct, they are the textbook technique,
+and the measurement showing they do not help is more useful than a ladder where
+every rung happens to look like an improvement. The warp reduction also has to
+exist for its own sake, since the fused attention kernel reduces across a warp
+where there is no bandwidth wall to hide behind.

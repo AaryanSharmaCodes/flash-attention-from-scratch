@@ -17,21 +17,33 @@ void matmul(const float* A, const float* B, float* C, int M, int N, int K) {
 }
 
 void softmax_rows(const float* in, float* out, int rows, int cols) {
+  // The exponentials and the sum are accumulated in double even though the
+  // result is stored as float.
+  //
+  // This started as a plain float32 sum and it made the reference useless as a
+  // referee. Summing n floats sequentially carries a relative error around
+  // sqrt(n) * eps, which at 4096 columns is 7.6e-06 -- the same size as the
+  // disagreement being measured. The GPU kernels that summed in a different
+  // order looked wrong, and the one that happened to sum in the same order as
+  // this loop looked perfect, when in truth neither was more accurate than the
+  // other. Accumulating in double drops the reference's own error to around
+  // 1e-15 and lets the comparison mean something.
+  std::vector<double> exps(cols);
   for (int i = 0; i < rows; ++i) {
     const float* r = in + (size_t)i * cols;
     float* o = out + (size_t)i * cols;
 
     // Subtracting the row max keeps every exp() argument at or below zero.
     // Without it a score of 90 or so overflows float and the row becomes NaN.
-    float m = -std::numeric_limits<float>::infinity();
-    for (int j = 0; j < cols; ++j) m = std::max(m, r[j]);
+    double m = -std::numeric_limits<double>::infinity();
+    for (int j = 0; j < cols; ++j) m = std::max(m, (double)r[j]);
 
-    float sum = 0.0f;
+    double sum = 0.0;
     for (int j = 0; j < cols; ++j) {
-      o[j] = std::exp(r[j] - m);
-      sum += o[j];
+      exps[j] = std::exp((double)r[j] - m);
+      sum += exps[j];
     }
-    for (int j = 0; j < cols; ++j) o[j] /= sum;
+    for (int j = 0; j < cols; ++j) o[j] = (float)(exps[j] / sum);
   }
 }
 

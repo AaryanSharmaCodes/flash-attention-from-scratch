@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
       2.0 * prop.memoryClockRate * 1e3 * (prop.memoryBusWidth / 8) / 1e9;
   std::printf("device            %s (sm_%d%d)\n", prop.name, prop.major, prop.minor);
   std::printf("peak bandwidth    %.0f GB/s\n", peak_gbs);
-  std::printf("problem           %d rows x %d cols\n\n", rows, cols);
+  std::printf("problem           %d rows x %d cols\n", rows, cols);
 
   std::mt19937 rng(0);
   std::normal_distribution<float> normal(0.0f, 1.0f);
@@ -91,6 +91,15 @@ int main(int argc, char** argv) {
   };
 
   const double bytes = 2.0 * (double)rows * cols * sizeof(float);
+
+  // The kernels sum the row in float32, so they carry an error of roughly
+  // sqrt(cols) * eps no matter how carefully they are written -- 7.6e-06 at
+  // 4096 columns. A fixed tolerance would either pass everything at 1024 or
+  // fail everything at 4096, so the bound scales the same way the error does.
+  // The factor of eight is headroom for the order the additions happen in and
+  // for __expf being the approximate exponential.
+  const double tol = 8.0 * std::sqrt((double)cols) * 1.192e-7;
+  std::printf("tolerance         %.3e  (8 * sqrt(cols) * eps)\n\n", tol);
   std::vector<Result> results;
   std::vector<float> got((size_t)rows * cols);
 
@@ -105,9 +114,7 @@ int main(int argc, char** argv) {
 
     const double ms = time_kernel(entry.fn, dIn, dOut, rows, cols, warmup, iters);
     const double gbs = bytes / (ms * 1e6);
-    // __expf is the fast hardware approximation, so the tolerance is looser
-    // than the 1e-7 the CPU reference agrees to with itself.
-    results.push_back({entry.name, ms, gbs, 100.0 * gbs / peak_gbs, err, err < 1e-5});
+    results.push_back({entry.name, ms, gbs, 100.0 * gbs / peak_gbs, err, err < tol});
 
     std::printf("%-16s %8.3f ms  %8.1f GB/s  %5.1f%% of peak  max err %.2e %s\n",
                 entry.name, ms, gbs, results.back().pct_of_peak, err,
@@ -119,7 +126,7 @@ int main(int argc, char** argv) {
   FILE* f = std::fopen(path, "w");
   if (f) {
     std::fprintf(f, "{\n  \"device\": \"%s\",\n  \"peak_gbs\": %.0f,\n", prop.name, peak_gbs);
-    std::fprintf(f, "  \"rows\": %d, \"cols\": %d, \"iters\": %d,\n  \"kernels\": [\n", rows, cols, iters);
+    std::fprintf(f, "  \"rows\": %d, \"cols\": %d, \"iters\": %d, \"tolerance\": %.3e,\n  \"kernels\": [\n", rows, cols, iters, tol);
     for (size_t i = 0; i < results.size(); ++i) {
       const Result& r = results[i];
       std::fprintf(f,
