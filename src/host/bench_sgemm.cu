@@ -19,7 +19,8 @@ struct Result {
   double ms;
   double gflops;
   double pct_of_cublas;
-  double max_rel_err;
+  double max_abs_err;
+  double frobenius_rel;
   bool correct;
 };
 
@@ -55,15 +56,34 @@ double time_kernel(void (*fn)(const float*, const float*, float*, int, int, int)
   return ms / iters;
 }
 
-// Relative error against cuBLAS. Absolute error is not meaningful here because
-// the entries of C grow with K, so a fixed tolerance would pass at K=256 and
-// fail at K=4096 for numerically identical work.
-double max_rel_error(const std::vector<float>& got, const std::vector<float>& want) {
-  double worst = 0.0;
+// Error against cuBLAS, measured over the whole matrix rather than element by
+// element.
+//
+// The first version of this compared each element to its own reference value.
+// That reports nonsense here: entries of C are sums of K products that can
+// cancel to nearly zero, and at K=512 the smallest entry of C is 3.7e-06
+// against a mean of 18.0. Dividing an ordinary rounding error by an entry that
+// small produced 1.6e-01 and flagged every kernel as wrong, including ones that
+// agreed with cuBLAS bit for bit.
+//
+// The Frobenius relative error, ||got - want|| / ||want||, is the usual measure
+// for GEMM for exactly this reason: it judges the result against the scale of
+// the whole matrix, so a near-zero entry contributes in proportion to how much
+// it actually matters.
+double frobenius_rel_error(const std::vector<float>& got, const std::vector<float>& want) {
+  double num = 0.0, den = 0.0;
   for (size_t i = 0; i < got.size(); ++i) {
-    const double denom = std::fabs(want[i]) > 1e-4 ? std::fabs(want[i]) : 1e-4;
-    worst = std::fmax(worst, std::fabs(got[i] - want[i]) / denom);
+    const double d = (double)got[i] - want[i];
+    num += d * d;
+    den += (double)want[i] * want[i];
   }
+  return std::sqrt(num) / std::sqrt(den);
+}
+
+double max_abs_error(const std::vector<float>& got, const std::vector<float>& want) {
+  double worst = 0.0;
+  for (size_t i = 0; i < got.size(); ++i)
+    worst = std::fmax(worst, std::fabs((double)got[i] - want[i]));
   return worst;
 }
 
@@ -137,15 +157,21 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemset(dC, 0, (size_t)M * N * sizeof(float)));
     entry.fn(dA, dB, dC, M, N, K);
     CUDA_CHECK(cudaMemcpy(got.data(), dC, got.size() * sizeof(float), cudaMemcpyDeviceToHost));
-    const double err = max_rel_error(got, want);
+    const double abs_err = max_abs_error(got, want);
+    const double frob = frobenius_rel_error(got, want);
+
+    // float32 accumulation over K terms lands around 4e-07 here, so 1e-05
+    // leaves two orders of magnitude of headroom while still catching a kernel
+    // that is genuinely computing the wrong thing.
+    const bool correct = frob < 1e-5;
 
     const double ms = time_kernel(entry.fn, dA, dB, dC, M, N, K, warmup, iters);
     const double gflops = flops / (ms * 1e6);
-    results.push_back({entry.name, ms, gflops, 100.0 * gflops / cublas_gflops, err, err < 1e-3});
+    results.push_back({entry.name, ms, gflops, 100.0 * gflops / cublas_gflops, abs_err, frob, correct});
 
-    std::printf("%-16s %8.3f ms  %8.1f GFLOP/s  %5.1f%% of cuBLAS  rel err %.2e %s\n",
-                entry.name, ms, gflops, results.back().pct_of_cublas, err,
-                results.back().correct ? "" : "  <-- WRONG");
+    std::printf("%-16s %8.3f ms  %8.1f GFLOP/s  %5.1f%% of cuBLAS  frob %.2e  abs %.2e %s\n",
+                entry.name, ms, gflops, results.back().pct_of_cublas, frob, abs_err,
+                correct ? "" : "  <-- WRONG");
   }
   std::printf("%-16s %8.3f ms  %8.1f GFLOP/s\n", "cuBLAS", cublas_ms, cublas_gflops);
 
@@ -160,9 +186,10 @@ int main(int argc, char** argv) {
       const Result& r = results[i];
       std::fprintf(f,
                    "    {\"name\": \"%s\", \"ms\": %.4f, \"gflops\": %.1f, "
-                   "\"pct_of_cublas\": %.1f, \"max_rel_err\": %.3e, \"correct\": %s}%s\n",
-                   r.name.c_str(), r.ms, r.gflops, r.pct_of_cublas, r.max_rel_err,
-                   r.correct ? "true" : "false", i + 1 < results.size() ? "," : "");
+                   "\"pct_of_cublas\": %.1f, \"frobenius_rel\": %.3e, "
+                   "\"max_abs_err\": %.3e, \"correct\": %s}%s\n",
+                   r.name.c_str(), r.ms, r.gflops, r.pct_of_cublas, r.frobenius_rel,
+                   r.max_abs_err, r.correct ? "true" : "false", i + 1 < results.size() ? "," : "");
     }
     std::fprintf(f, "  ]\n}\n");
     std::fclose(f);

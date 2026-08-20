@@ -87,3 +87,45 @@ The softmax benchmark generates values around 20 rather than around 0. With
 inputs near zero a kernel that forgets to subtract the row max still produces the
 right answer, and the test passes for the wrong reason. Around 20, and more so at
 the tails, the unguarded version overflows and gets caught.
+
+## The first correctness check was measuring the wrong thing
+
+The benchmark originally compared each element of C against its cuBLAS value and
+divided by that value. Every kernel in the ladder came back at 1.64e-01 and was
+flagged as wrong.
+
+Four kernels with different memory strategies producing the same wrong answer to
+three significant figures is not plausible, so the measurement was the suspect
+rather than the kernels. Checking everything, cuBLAS included, against a
+double-precision CPU matmul settled it:
+
+    true C at 512:  mean |C| 18.04, max |C| 109.47, min |C| 3.743e-06
+    every implementation:  max abs 1.019e-04, frobenius 4.048e-07
+    pairwise difference between all five:  0.000e+00
+
+The worst element by the old measure was C[258995], true value -9.275e-06, where
+512 products cancel almost to nothing. An absolute difference of 3.4e-06 there is
+ordinary float32 noise, but dividing it by an entry that small manufactures a
+large number that says nothing about the kernel.
+
+The check is now the Frobenius relative error, which is what is normally quoted
+for GEMM, and the tolerance is 1e-05 against an observed 4e-07. Absolute error is
+reported alongside it, since a single number was what caused the confusion.
+
+## All five implementations agree bit for bit, which is expected
+
+The pairwise table is exactly zero everywhere, cuBLAS included. That looked
+alarming and is not:
+
+Tiling changes where a value is staged on its way to the ALU. It does not change
+the order the products are added in. All four kernels accumulate each output into
+a single scalar with k strictly increasing -- naive walks k = 0..K-1, tiled walks
+tile 0 then tile 1, register tiled walks blocks of eight -- so the sequence of
+additions is identical in every case. Float addition is not associative, so a
+reordering would move the low bits, but nothing here reorders. nvcc also
+contracts acc += a*b into a single FMA by default, and cuBLAS evidently picks a
+matching order at this size.
+
+Worth stating plainly: throughput moves by a factor of 32 across the ladder and
+the result does not change by one bit. These optimisations are about moving data,
+not about arithmetic.
