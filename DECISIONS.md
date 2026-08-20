@@ -55,3 +55,35 @@ The first launch of a kernel pays for module loading and possibly JIT. On a cold
 context that is milliseconds, which would swamp everything else at these sizes.
 Five warmup iterations, then twenty timed ones, measured with CUDA events rather
 than host clocks so the number does not include launch queueing.
+
+## Softmax is reported in bandwidth, not flops
+
+Softmax does one exponential and a couple of comparisons per element it loads,
+so it is bound by memory rather than arithmetic. Quoting GFLOP/s for it would be
+meaningless. The benchmark reports achieved bandwidth as a share of the card's
+theoretical peak instead.
+
+Effective bandwidth is computed from the traffic the problem requires -- one read
+of the input, one write of the output -- and not from the traffic a particular
+kernel chooses to generate. The three-pass kernels read each row three times, and
+counting those redundant reads would let a worse kernel report a better number.
+
+## The online softmax is in the repo mainly as a bridge
+
+It saves one of the three passes over the row, which is worth something, but the
+reason it exists here is that its combine step
+
+    m = max(m1, m2)
+    l = l1 * exp(m1 - m) + l2 * exp(m2 - m)
+
+is exactly the rescale that FlashAttention applies when it moves from one block
+of keys to the next. Doing it first across the lanes of a warp, where it is easy
+to check against the CPU reference, means the fused attention kernel is applying
+a rule that has already been shown to work.
+
+## Test inputs are shifted away from zero
+
+The softmax benchmark generates values around 20 rather than around 0. With
+inputs near zero a kernel that forgets to subtract the row max still produces the
+right answer, and the test passes for the wrong reason. Around 20, and more so at
+the tails, the unguarded version overflows and gets caught.

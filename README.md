@@ -11,14 +11,14 @@ worth.
 
 ## Status
 
-Stage 1 of 3 is written; numbers below are filled in from the JSON in `results/`
-once each stage has been run on a GPU.
+Stages 1 and 2 are written; numbers below are filled in from the JSON in
+`results/` once each stage has been run on a GPU.
 
 | stage | what it adds | state |
 | --- | --- | --- |
 | CPU reference | textbook and streaming attention, agreeing to 3e-07 | done, checked |
 | 1. matmul ladder | naive, coalesced, shared-memory tiled, register tiled | written, not yet measured |
-| 2. softmax | tree reduction, then warp shuffle | not started |
+| 2. softmax | one thread per row, shared-memory tree, warp shuffle, online | written, not yet measured |
 | 3. fused attention | unfused three-kernel, then tiled and fused | not started |
 
 ## Running it
