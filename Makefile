@@ -10,13 +10,16 @@ CXXFLAGS  := -O2 -std=c++17
 
 BUILD := build
 
-.PHONY: all bench test clean
-all: $(BUILD)/bench_sgemm $(BUILD)/bench_softmax $(BUILD)/test_reference
+.PHONY: all bench test diagnose clean
+all: $(BUILD)/bench_sgemm $(BUILD)/bench_softmax $(BUILD)/diagnose_sgemm $(BUILD)/test_reference
 
 $(BUILD):
 	@mkdir -p $(BUILD) results
 
 $(BUILD)/bench_sgemm: src/host/bench_sgemm.cu src/kernels/sgemm.cu | $(BUILD)
+	$(NVCC) $(NVCCFLAGS) -o $@ $^ -lcublas
+
+$(BUILD)/diagnose_sgemm: src/host/diagnose_sgemm.cu src/kernels/sgemm.cu | $(BUILD)
 	$(NVCC) $(NVCCFLAGS) -o $@ $^ -lcublas
 
 $(BUILD)/bench_softmax: src/host/bench_softmax.cu src/kernels/softmax.cu ref/reference.cpp | $(BUILD)
@@ -33,6 +36,9 @@ bench: $(BUILD)/bench_sgemm $(BUILD)/bench_softmax
 	./$(BUILD)/bench_sgemm 4096
 	./$(BUILD)/bench_softmax 4096 1024
 	./$(BUILD)/bench_softmax 4096 4096
+
+diagnose: $(BUILD)/diagnose_sgemm
+	./$(BUILD)/diagnose_sgemm 512
 
 test: $(BUILD)/test_reference
 	./$(BUILD)/test_reference
